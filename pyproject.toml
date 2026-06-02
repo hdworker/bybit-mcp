@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bybit-mcp"
+version = "0.1.0"
+description = "Bybit v5 broker MCP server with fail-closed consent gate"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "hdworker", email = "hdworker@yandex.ru" },
+]
+keywords = ["bybit", "mcp", "trading", "crypto", "vibe-trading"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "httpx>=0.28.0",
+    "fastmcp>=2.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+vibe = [
+    # Compatibility marker for Vibe-Trading agent SDK users.
+    # Redaction is inlined; this dep is optional for future SDK integration.
+    "vibe-trading-ai>=0.1.9",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "pytest-httpx>=0.30",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+bybit-mcp = "bybit_mcp.server.mcp_server:main"
+
+[project.urls]
+Homepage = "https://github.com/hdworker/bybit-mcp"
+Repository = "https://github.com/hdworker/bybit-mcp"
+Issues = "https://github.com/hdworker/bybit-mcp/issues"
+Changelog = "https://github.com/hdworker/bybit-mcp/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bybit_mcp = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

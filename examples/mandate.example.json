@@ -1,0 +1,27 @@
+{
+  "_comment": "bybit-mcp mandate.example.json — copy to ~/.vibe-trading/live/bybit/mandate.json and edit values.",
+  "_note": "This schema matches Vibe-Trading's src.live.mandate.model.Mandate EXACTLY.",
+  "schema_version": 1,
+  "hard_caps": {
+    "account_funding_usd": 5000.0,
+    "max_order_notional_usd": 1000.0,
+    "max_total_exposure_usd": 5000.0,
+    "max_leverage": 3.0,
+    "allowed_instruments": ["crypto"],
+    "max_trades_per_day": 50
+  },
+  "universe": {
+    "asset_classes": ["crypto"],
+    "min_market_cap_usd": null,
+    "min_avg_daily_volume_usd": null,
+    "exclude_symbols": []
+  },
+  "consent": {
+    "created_at": "2026-06-02T00:00:00+00:00",
+    "consent_token_sha256": "<sha256 of the user-side consent artifact>",
+    "broker": "bybit",
+    "account_ref": "bybit-acct-0001",
+    "expires_at": "2026-07-02T00:00:00+00:00"
+  },
+  "flatten_on_halt": false
+}

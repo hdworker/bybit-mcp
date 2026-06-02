@@ -1,0 +1,22 @@
+{
+  "_comment": "bybit-mcp opencode.json — add to ~/.config/opencode/opencode.json under the 'mcp' key.",
+  "_note": "Set BYBIT_API_KEY and BYBIT_API_SECRET in your environment or .env file.",
+  "mcp": {
+    "bybit": {
+      "type": "local",
+      "command": [
+        "bybit-mcp",
+        "--transport",
+        "stdio"
+      ],
+      "enabled": true,
+      "environment": {
+        "BYBIT_API_KEY": "${BYBIT_API_KEY}",
+        "BYBIT_API_SECRET": "${BYBIT_API_SECRET}",
+        "BYBIT_TESTNET": "false",
+        "VIBE_RUNTIME_ROOT": "~/.vibe-trading",
+        "BYBIT_BROKER_KEY": "bybit"
+      }
+    }
+  }
+}
