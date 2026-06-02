@@ -1,6 +1,7 @@
 # bybit-mcp
 
 [![CI](https://github.com/hdworker/bybit-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hdworker/bybit-mcp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/bybit-go-mcp.svg)](https://pypi.org/project/bybit-go-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -249,6 +250,13 @@ make lint          # ruff check
 make format        # black + ruff --fix
 make run-stdio     # stdio transport
 make run-sse       # HTTP transport on :8001
+```
+
+## Install from PyPI
+
+```bash
+pip install bybit-go-mcp
+bybit-mcp --help
 ```
 
 ## License

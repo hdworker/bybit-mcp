@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bybit-mcp"
+name = "bybit-go-mcp"
 version = "0.1.0"
 description = "Bybit v5 broker MCP server with fail-closed consent gate"
 readme = "README.md"

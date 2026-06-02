@@ -11,3 +11,13 @@ dist/
 htmlcov/
 .coverage
 *.log
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
