@@ -6,17 +6,13 @@
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-Bybit v5 broker MCP server for [Vibe-Trading](https://github.com/your-org/vibe-trading).
+MCP-сервер для Bybit v5 — рыночные данные, аккаунт, ордера и инструменты скальпинга/интрадея.
 
-Exposes 17 tools to an MCP-aware agent (LLM):
+---
 
-- **11 read** (market data + private account snapshots) — no mandate gate.
-- **6 write** (place / amend / cancel / cancel-all / set leverage / set TP/SL) — **gated by the user-side mandate**, fail-closed.
+Bybit v5 broker MCP server — market data, account, orders, and scalping/intraday tools for [scalp-lab](https://github.com/hdworker/scalp-lab).
 
-The mandate file, kill switch, daily counter, and audit ledger live in the same
-filesystem layout Vibe-Trading's in-repo `LiveOrderGuardTool` reads from, so the
-in-process guard and the bybit-mcp guard see **the same state** and the audit
-ledger is unified.
+---
 
 ## Quick start
 
@@ -29,181 +25,199 @@ pip install -e ".[dev]"
 cp .env.example .env
 $EDITOR .env                  # set BYBIT_API_KEY / BYBIT_API_SECRET
 
-# 3. Commit a mandate
-mkdir -p ~/.vibe-trading/live/bybit
-$EDITOR ~/.vibe-trading/live/bybit/mandate.json    # see schema below
-
-# 4. Run (stdio for embedding into Vibe-Trading)
+# 3. Run (stdio for MCP embedding)
 python -m bybit_mcp.server.mcp_server --transport stdio
 
-# 4b. Or run over HTTP for curl testing
+# 3b. Or run over HTTP for testing
 python -m bybit_mcp.server.mcp_server --transport http --port 8001
 ```
 
-## Tool surface
+## Архитектура
 
-| Tool | Type | Gated | Notes |
-|------|------|------|-------|
-| `bybit_get_tickers` | read | no | public, no auth |
-| `bybit_get_kline` | read | no | public, no auth |
-| `bybit_get_orderbook` | read | no | public, no auth |
-| `bybit_get_funding_history` | read | no | public, no auth |
-| `bybit_get_open_interest` | read | no | public, no auth |
-| `bybit_get_instruments_info` | read | no | public, no auth |
-| `bybit_get_recent_trades` | read | no | public, no auth |
-| `bybit_get_wallet_balance` | read | no | signed, needs API creds |
-| `bybit_get_positions` | read | no | signed, needs API creds |
-| `bybit_get_open_orders` | read | no | signed, needs API creds |
-| `bybit_get_order_history` | read | no | signed, needs API creds |
-| `bybit_place_order` | write | **yes** | deny on missing mandate / kill switch / cap breach |
-| `bybit_amend_order` | write | **yes** | enforces the LARGER of (explicit notional, new_qty × live price) |
-| `bybit_cancel_order` | write | **yes** | single order |
-| `bybit_cancel_all_orders` | write | **yes** | bulk |
-| `bybit_set_leverage` | write | **yes** | structural check only |
-| `bybit_set_trading_stop` | write | **yes** | TP/SL price change does not alter notional math |
-
-## Mandate file
-
-A valid `mandate.json` is required at `<runtime_root>/live/bybit/mandate.json`
-before any write tool is callable. Without it, every order attempt returns
-`status="blocked", decision="deny", reason="no valid mandate on file"`.
-
-The schema matches Vibe-Trading's `src.live.mandate.model.Mandate` EXACTLY so
-a mandate committed by the Vibe-Trading consent UX is readable by bybit-mcp
-without translation, and vice versa.
-
-```json
-{
-  "schema_version": 1,
-  "hard_caps": {
-    "account_funding_usd": 5000.0,
-    "max_order_notional_usd": 1000.0,
-    "max_total_exposure_usd": 5000.0,
-    "max_leverage": 3.0,
-    "allowed_instruments": ["crypto"],
-    "max_trades_per_day": 50
-  },
-  "universe": {
-    "asset_classes": ["crypto"],
-    "min_market_cap_usd": null,
-    "min_avg_daily_volume_usd": null,
-    "exclude_symbols": ["DOGEUSDT"]
-  },
-  "consent": {
-    "created_at": "2026-06-01T00:00:00+00:00",
-    "consent_token_sha256": "<sha256 of the user-side consent artifact>",
-    "broker": "bybit",
-    "account_ref": "bybit-acct-0001",
-    "expires_at": "2026-07-01T00:00:00+00:00"
-  },
-  "flatten_on_halt": false
-}
+```
++------------------+      stdio/HTTP      +------------------+
+|   scalp-lab MCP  | <------------------> |   bybit-mcp      |
+|   (analytics)    |                      |   (data + tools) |
++------------------+                      +--------+---------+
+                                                   |
+                                          +--------v---------+
+                                          |   Bybit v5 API   |
+                                          +------------------+
 ```
 
-## 6-step fail-closed gate
+**bybit-mcp** — чистый data provider. Вся аналитика (scoring, strategies, verdict) — в scalp-lab MCP.
 
-Every write tool runs the same gate (mirrors Vibe-Trading's
-`src.live.order_guard.LiveOrderGuardTool`):
+---
 
-1. `load_mandate` — no mandate / wrong `schema_version` → DENY.
-2. `expires_at` — past the user-set expiry → PAUSE_FOR_REAUTH.
-3. `halt_flag_set` — kill switch tripped → DENY, no remote call.
-4. `extract_order_intent` — unparseable args → DENY.
-5. `quantity → notional` — quantity-only orders derive notional from a live
-   quote; no quote → DENY (fail-closed). H3: if both `quantity` and
-   `notional_usd` are present, the LARGER is enforced.
-6. `check_mandate` — exclude-list, instrument allowance, asset class, single
-   notional cap, post-trade exposure cap, leverage cap, daily count, funding
-   ceiling. Structural breaches → DENY; quantitative breaches → PAUSE_FOR_REAUTH.
+## ДАННЫЕ
 
-The daily counter is incremented **only** on a confirmed ALLOW whose forwarded
-broker result is non-error (a failed forward never placed an order and never
-consumes a count, H2).
+### Рыночные данные (7 tools)
 
-Every decision writes one redacted record to `<runtime_root>/live/audit.jsonl`.
+| Tool | Описание |
+|------|----------|
+| `bybit_get_tickers` | Тикеры: lastPrice, bid1, ask1, volume24h, price24hPcnt, fundingRate, openInterest |
+| `bybit_get_kline` | Свечи (K-line): interval 1m–MN, до 1000 свечей за запрос |
+| `bybit_get_orderbook` | Стакан (L2): bids/asks по 5–50 уровней |
+| `bybit_get_funding_history` | История funding rate: rate + timestamp |
+| `bybit_get_open_interest` | Открытый интерес: volume + timestamp |
+| `bybit_get_instruments_info` | Мета-инструмента: lotSizeFilter, priceFilter, leverage limits |
+| `bybit_get_recent_trades` | Последние 60 сделок: price, size, side, time |
 
-## Audit ledger
+### Аккаунт (4 tools)
 
-`<runtime_root>/live/audit.jsonl` is the unified live-action ledger. bybit-mcp
-writes here, Vibe-Trading's native guard writes here, and the CLI / SSE relay
-reads from here.
+| Tool | Описание |
+|------|----------|
+| `bybit_get_wallet_balance` | Баланс: per-coin equity, walletBalance, unrealisedPnl |
+| `bybit_get_positions` | Открытые позиции: symbol, side, size, avgPrice, liqPrice, leverage |
+| `bybit_get_open_orders` | Активные ордера: orderId, side, type, price, qty, status |
+| `bybit_get_order_history` | История ордёров (до 2 лет): все поля + createdTime, cumExecFee |
 
-Each record (redacted via the `redact_payload` helper, so `api_key`,
-`secret`, `*token*`, `account_number`, `routing_number`, `ssn`, etc. are
-`"[redacted]"`):
+### Ордера (6 tools)
 
-```json
-{
-  "audit_id": "la_3f2c…",
-  "ts": "2026-06-02T09:15:49.482+00:00",
-  "session_id": "vibe-2026-06-02-session-001",
-  "kind": "order_placed",
-  "outcome": "accepted",
-  "server": "bybit",
-  "remote_tool": "bybit_place_order",
-  "intent_normalized": "buy $100 BTCUSDT (linear)",
-  "mandate_snapshot_ref": "<sha256 of the mandate's consent token>",
-  "consent_record_ref": "bybit-acct-0001",
-  "broker_request": { "category": "linear", "symbol": "BTCUSDT", "side": "Buy", "qty": "0.001" },
-  "broker_response": { "orderId": "1234567890", "orderLinkId": "" },
-  "gate_decision": { "allowed": true, "decision": "allow", "checked_limits": [...] },
-  "error": null
-}
+| Tool | Описание |
+|------|----------|
+| `bybit_place_order` | Размещение: Limit/Market/Stop, gated by mandate |
+| `bybit_amend_order` | Изменение: price/qty/TP/SL, enforce LARGER notional |
+| `bybit_cancel_order` | Отмена одного ордера |
+| `bybit_cancel_all_orders` | Массовая отмена (все или по символу) |
+| `bybit_set_leverage` | Установка плеча (structural check) |
+| `bybit_set_trading_stop` | TP/SL на позицию |
+
+---
+
+## СКАЛЬПИНГ / ИНТРАДЕЙ
+
+### Скринер — `bybit_get_scalper_screener`
+
+Сканирует все perpetuals и фильтрует по критериям скальпинга.
+
+**Фильтры:**
+- `min_volume_usd` — минимальный 24h turnover (по умолчанию 10M USDT)
+- `max_spread_pct` — максимальный bid-ask spread (по умолчанию 0.1%)
+- `min_volatility_pct` — минимальная 24h волатильность (по умолчанию 3%)
+
+**Логика:**
+```
+spread_pct = (ask1 - bid1) / bid1 × 100
+volatility_pct = abs(price24hPcnt) × 100
 ```
 
-## Kill switch
+**Сортировка:** volume DESC → spread ASC → volatility DESC
 
-Stop all live activity instantly, independent of the LLM cooperating:
+**Возвращает:** symbol, lastPrice, bid1, ask1, spread%, volume24h, volatility%, price24hPcnt
 
-```bash
-# Trip the GLOBAL switch (halts all brokers)
-touch ~/.vibe-trading/live/HALT
-# write the trip attribution
-python -c "from bybit_mcp.safety.halt import trip_halt; trip_halt('cli', 'manual stop')"
+---
 
-# Trip a per-broker switch (halts bybit only)
-python -c "from bybit_mcp.safety.halt import trip_halt; trip_halt('cli', 'manual stop', broker='bybit')"
+### Анализ — `bybit_get_scalping_analysis`
 
-# Clear (this is a privileged surface action, NOT exposed as an MCP tool)
-python -c "from bybit_mcp.safety.halt import clear_halt; clear_halt()"
-python -c "from bybit_mcp.safety.halt import clear_halt; clear_halt(broker='bybit')"
+Комплексный анализ одного тикера: spread, ликвидность, глубина стакана, флоу, funding, вердикт.
+
+**Формулы:**
+```
+spread_score = clamp(100 - spread_pct × 500, 0, 100)
+volume_score = min(100, volume_24h / 1M × 10)
+depth_score  = min(100, depth_total_usd / 10K × 10)
+
+liquidity_score = spread_score × 0.4 + volume_score × 0.3 + depth_score × 0.3
+volatility_score = min(100, volatility_24h / 5 × 20)
+
+scalping_score = liquidity_score × 0.5 + volatility_score × 0.5
 ```
 
-A user can also `touch` the sentinel directly (the `by` / `reason` JSON body
-is attribution only; the file's *existence* is what enforces the halt).
+**Вердикт:**
+| Score | Verdict |
+|-------|---------|
+| ≥ 80 | EXCELLENT |
+| ≥ 60 | GOOD |
+| ≥ 40 | FAIR |
+| < 40 | POOR |
 
-## Integration with Vibe-Trading
+**Возвращает:** spread, liquidity (score + depth_usd), volatility (24h% + 100m_range%), trade_flow (direction + ratio), funding (rate + rate_24h%), scalping (score + verdict + recommended target/stop%)
 
-Add an entry to your Vibe-Trading `agent.json` MCP registry:
+---
 
-```json
-{
-  "mcpServers": {
-    "bybit": {
-      "command": "python",
-      "args": ["-m", "bybit_mcp.server.mcp_server", "--transport", "stdio"],
-      "env": {
-        "VIBE_RUNTIME_ROOT": "~/.vibe-trading",
-        "BYBIT_API_KEY": "${BYBIT_API_KEY}",
-        "BYBIT_API_SECRET": "${BYBIT_API_SECRET}",
-        "BYBIT_TESTNET": "false",
-        "BYBIT_BROKER_KEY": "bybit"
-      }
-    }
-  }
-}
+### Сессия — `bybit_scalp_session_status`
+
+Проверяет текущую торговую сессию (UTC).
+
+**Окна:**
+| Стратегия | Начало | Конец | Entry allowed |
+|-----------|--------|-------|---------------|
+| scalping | 14:00 | 18:00 | ✅ |
+| intraday | 14:00 | 21:00 | ✅ |
+| momentum | 14:00 | 21:00 | ✅ |
+| mean_reversion | 14:00 | 18:00 | ✅ |
+
+**Возвращает:** current_session (active/closed), entry_allowed, minutes_until_close, weekend
+
+---
+
+### Ордербук-анализ — `bybit_scalp_orderbook_analysis`
+
+Анализ стакана: spread, imbalance, обнаружение стен.
+
+**Формулы:**
+```
+imbalance = (bidTotal - askTotal) / (bidTotal + askTotal)
+ratio     = bidTotal / askTotal
+spread    = (ask - bid) / bid × 100
 ```
 
-Vibe-Trading's native `LiveOrderGuardTool` (in-repo, wrapping the
-`MCPRemoteTool` instances) and the bybit-mcp server share:
+**Стены (walls):**
+```
+all_sizes = [bid sizes] + [ask sizes]
+threshold = mean(all_sizes) + 3 × std(all_sizes)
+```
+Всё, что ≥ threshold — стена.
 
-- The **mandate file** at `<runtime_root>/live/<broker>/mandate.json`.
-- The **halt sentinel** at `<runtime_root>/live/HALT` (and per-broker).
-- The **daily counter** at `<runtime_root>/live/<broker>/trade_counter.json`.
-- The **audit ledger** at `<runtime_root>/live/audit.jsonl`.
+**Возвращает:** spread (absolute + pct), imbalance (bidTotal, askTotal, ratio, imbalance), walls (bids[], asks[]), summary (side + wallCount)
 
-This means a single mandate commit and a single `HALT` sentinel covers both
-the in-process and the cross-process (MCP) order paths.
+---
+
+### Трейд-флоу — `bybit_scalp_trade_flow`
+
+Анализ потока сделок: buy/sell ratio, VWAP, крупные ордера.
+
+**Формулы:**
+```
+buy_ratio  = buyVolume / (buyVolume + sellVolume)
+vwap       = Σ(price × size) / Σ(size)
+```
+
+**Определение направления:**
+| buy_ratio | Direction |
+|-----------|-----------|
+| > 0.55 | BUY_PRESSURE |
+| < 0.45 | SELL_PRESSURE |
+| 0.45–0.55 | BALANCED |
+
+**Крупные ордера:** top 10% по размеру за lookbackSec.
+
+**Возвращает:** direction, buy_ratio, buy_volume, sell_volume, vwap, large_orders
+
+---
+
+### Ордербук-стратегии — `bybit_scalp_orderbook_strategy`
+
+5 микроструктурных стратегий → ensemble consensus.
+
+**Стратегии:**
+
+| # | ID | Логика | Действие |
+|---|-----|--------|----------|
+| 1 | ob-imbalance | ratio > 1.5 и imbalance > 0.2 → buy; ratio < 0.67 и imbalance < -0.2 → sell | buy/sell/hold |
+| 2 | ob-wall-break | Стены только на одной стороне (3σ) → buy/sell | buy/sell/hold |
+| 3 | ob-absorption | Заглушка (stub) | hold |
+| 4 | ob-delta-div | Заглушка (stub) | hold |
+| 5 | ob-flow-ratio | buy_ratio > 65% → buy; < 35% → sell | buy/sell/hold |
+
+**Ensemble:**
+- ≥ 3 strategies agree → consensus action + average confidence
+- Иначе → hold
+
+**Возвращает:** action (buy/sell/hold), confidence, buyCount, sellCount, holdCount, signals[]
+
+---
 
 ## Environment
 
@@ -214,38 +228,16 @@ the in-process and the cross-process (MCP) order paths.
 | `BYBIT_TESTNET` | `false` | Use testnet base URL |
 | `BYBIT_HTTP_TIMEOUT` | `10` | httpx request timeout (seconds) |
 | `BYBIT_RECV_WINDOW` | `5000` | recv_window for signed requests (ms) |
-| `BYBIT_BROKER_KEY` | `bybit` | Per-broker mandate/halt/counter path key |
-| `VIBE_RUNTIME_ROOT` | `~/.vibe-trading` | Runtime root for mandate/audit/halt/counter |
+| `BYBIT_BROKER_KEY` | `bybit` | Per-broker path key |
 | `BYBIT_MCP_LOG_LEVEL` | `INFO` | Logger level |
 | `BYBIT_MCP_HOST` | `127.0.0.1` | HTTP host (when `--transport http`) |
 | `BYBIT_MCP_PORT` | `8001` | HTTP port (when `--transport http`) |
-
-## Architecture
-
-```
-+------------------------+        +-------------------------+
-|   Vibe-Trading agent   | stdio  |   bybit-mcp process     |
-|   - agent loop         |<------>|   - FastMCP server      |
-|   - native guard (in-  |  HTTP  |   - MandateGate         |
-|     process MCP tools) |        |   - 17 tools (11R+6W)   |
-+-----------+------------+        +------------+------------+
-            |                                  |
-            |   <runtime_root>/live/...        |
-            +----------------------------------+
-                  shared state, audit ledger
-```
-
-The MCP server is **stateless across tool calls** — the mandate / halt / counter
-are re-read from disk on every invocation, so a user-side commit / trip is
-immediately visible to the next order attempt. The shared `BybitClient` keeps
-a single TCP connection open + a synced clock across the server lifetime (see
-`server_lifespan` in `mcp_server.py`).
 
 ## Development
 
 ```bash
 make install       # pip install -e ".[dev]"
-make test          # pytest (95 tests, ~2s)
+make test          # pytest
 make lint          # ruff check
 make format        # black + ruff --fix
 make run-stdio     # stdio transport
