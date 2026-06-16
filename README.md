@@ -10,7 +10,7 @@ MCP-сервер для Bybit v5 — рыночные данные, аккаун
 
 ---
 
-Bybit v5 broker MCP server — market data, account, orders, and scalping/intraday tools for [scalp-lab](https://github.com/hdworker/scalp-lab).
+Bybit v5 broker MCP server — market data, account, orders, and scalping/intraday tools for your [AI agent](https://github.com/anomalyco/opencode).
 
 ---
 
@@ -36,8 +36,8 @@ python -m bybit_mcp.server.mcp_server --transport http --port 8001
 
 ```
 +------------------+      stdio/HTTP      +------------------+
-|   scalp-lab MCP  | <------------------> |   bybit-mcp      |
-|   (analytics)    |                      |   (data + tools) |
+|AI-agent (Opencode)| <-----------------> |   bybit-mcp      |
+| (Alice, Gigachat) |                      |   (data + tools) |
 +------------------+                      +--------+---------+
                                                    |
                                           +--------v---------+
@@ -45,7 +45,7 @@ python -m bybit_mcp.server.mcp_server --transport http --port 8001
                                           +------------------+
 ```
 
-**bybit-mcp** — чистый data provider. Вся аналитика (scoring, strategies, verdict) — в scalp-lab MCP.
+**bybit-mcp** — чистый data provider. Вся аналитика (scoring, strategies, verdict) — в вашем AI-агенте.
 
 ---
 
